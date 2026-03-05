@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mission Control — Admin View</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; background:#0b1020; color:#e6eaf2; }
+      .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+      select, input, button { padding:8px; border-radius:8px; border:1px solid #2b3555; background:#111831; color:#e6eaf2; }
+      table { width:100%; border-collapse: collapse; margin-top:12px; }
+      th, td { padding:10px; border-bottom:1px solid #26304e; text-align:left; font-size:14px; }
+      .pill { padding:2px 8px; border-radius:999px; border:1px solid #425082; font-size:12px; }
+      .muted { color:#9aa4bf; font-size:12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Mission Control — Admin</h1>
+    <p class="muted">Set Admin Key once per browser session.</p>
+
+    <div class="row">
+      <input id="adminKey" placeholder="Admin key" size="48" />
+      <button id="saveKeyBtn">Save Key</button>
+    </div>
+
+    <div class="row">
+      <label>Lane
+        <select id="laneFilter">
+          <option value="">all</option>
+          <option value="research">research</option>
+          <option value="finance">finance</option>
+          <option value="sports">sports</option>
+          <option value="ops">ops</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="statusFilter">
+          <option value="">all</option>
+          <option value="backlog">backlog</option>
+          <option value="in_progress">in_progress</option>
+          <option value="review">review</option>
+          <option value="done">done</option>
+        </select>
+      </label>
+      <button id="refreshBtn">Refresh</button>
+    </div>
+
+    <div class="row">
+      <input id="newTitle" placeholder="New task title" size="40" />
+      <select id="newLane">
+        <option value="research">research</option>
+        <option value="finance">finance</option>
+        <option value="sports">sports</option>
+        <option value="ops">ops</option>
+      </select>
+      <button id="createBtn">Create Task</button>
+    </div>
+
+    <table>
+      <thead><tr><th>Task</th><th>Lane</th><th>Status</th><th>Owner</th><th>Action</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script>
+      const BASE = "https://flexible-manatee-126.convex.site/mission-control";
+      const statuses = ["backlog", "in_progress", "review", "done"];
+
+      function getKey() { return localStorage.getItem("mc_admin_key") || ""; }
+      function saveKey() {
+        localStorage.setItem("mc_admin_key", document.getElementById("adminKey").value.trim());
+        alert("Saved");
+      }
+
+      async function loadTasks() {
+        const lane = document.getElementById("laneFilter").value;
+        const status = document.getElementById("statusFilter").value;
+        const url = new URL(BASE + "/tasks");
+        if (lane) url.searchParams.set("lane", lane);
+        if (status) url.searchParams.set("status", status);
+        const res = await fetch(url);
+        const data = await res.json();
+        const rows = document.getElementById("rows");
+        rows.innerHTML = "";
+        (data.tasks || []).sort((a,b)=>b.updatedAt-a.updatedAt).forEach(t=>{
+          const options = statuses.filter(s => s !== t.status).map(s=>`<option value="${s}">${s}</option>`).join("");
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${t.title}</td><td><span class="pill">${t.lane}</span></td><td>${t.status}</td><td>${t.ownerAgent || '-'}</td><td><select id="s-${t._id}">${options}</select><button onclick="moveStatus('${t._id}')">Move</button></td>`;
+          rows.appendChild(tr);
+        });
+      }
+
+      async function createTask() {
+        const title = document.getElementById("newTitle").value.trim();
+        const lane = document.getElementById("newLane").value;
+        if (!title) return;
+        const res = await fetch(BASE + "/tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-key": getKey() },
+          body: JSON.stringify({ title, lane })
+        });
+        if (!res.ok) return alert("Create failed: check admin key");
+        document.getElementById("newTitle").value = "";
+        loadTasks();
+      }
+
+      async function moveStatus(taskId) {
+        const status = document.getElementById(`s-${taskId}`).value;
+        const actorAgent = prompt("actorAgent", "main-orchestrator") || "main-orchestrator";
+        const res = await fetch(BASE + "/tasks/status", {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "x-admin-key": getKey() },
+          body: JSON.stringify({ taskId, status, actorAgent })
+        });
+        if (!res.ok) return alert("Update failed: check admin key / actor role");
+        loadTasks();
+      }
+
+      document.getElementById("saveKeyBtn").onclick = saveKey;
+      document.getElementById("refreshBtn").onclick = loadTasks;
+      document.getElementById("createBtn").onclick = createTask;
+      loadTasks();
+    </script>
+  </body>
+</html>

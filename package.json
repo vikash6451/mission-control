@@ -1,0 +1,9 @@
+{
+  "name": "mission-control-lite",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mission Control Lite (Convex backend + static UI)",
+  "dependencies": {
+    "convex": "^1.32.0"
+  }
+}

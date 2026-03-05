@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mission Control — Public View</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; background:#0b1020; color:#e6eaf2; }
+      .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+      select, button { padding:8px; border-radius:8px; border:1px solid #2b3555; background:#111831; color:#e6eaf2; }
+      table { width:100%; border-collapse: collapse; margin-top:12px; }
+      th, td { padding:10px; border-bottom:1px solid #26304e; text-align:left; font-size:14px; }
+      .pill { padding:2px 8px; border-radius:999px; border:1px solid #425082; font-size:12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Mission Control — Public (Read-only)</h1>
+    <div class="row">
+      <label>Lane
+        <select id="laneFilter">
+          <option value="">all</option>
+          <option value="research">research</option>
+          <option value="finance">finance</option>
+          <option value="sports">sports</option>
+          <option value="ops">ops</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="statusFilter">
+          <option value="">all</option>
+          <option value="backlog">backlog</option>
+          <option value="in_progress">in_progress</option>
+          <option value="review">review</option>
+          <option value="done">done</option>
+        </select>
+      </label>
+      <button id="refreshBtn">Refresh</button>
+    </div>
+
+    <table>
+      <thead><tr><th>Task</th><th>Lane</th><th>Status</th><th>Owner</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script>
+      const BASE = "https://flexible-manatee-126.convex.site/mission-control";
+      async function loadTasks() {
+        const lane = document.getElementById("laneFilter").value;
+        const status = document.getElementById("statusFilter").value;
+        const url = new URL(BASE + "/tasks");
+        if (lane) url.searchParams.set("lane", lane);
+        if (status) url.searchParams.set("status", status);
+        const res = await fetch(url);
+        const data = await res.json();
+        const rows = document.getElementById("rows");
+        rows.innerHTML = "";
+        (data.tasks || []).sort((a,b)=>b.updatedAt-a.updatedAt).forEach(t=>{
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${t.title}</td><td><span class="pill">${t.lane}</span></td><td>${t.status}</td><td>${t.ownerAgent || '-'}</td>`;
+          rows.appendChild(tr);
+        })
+      }
+      document.getElementById("refreshBtn").onclick = loadTasks;
+      loadTasks();
+    </script>
+  </body>
+</html>

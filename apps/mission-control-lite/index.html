@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mission Control Lite</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; background:#0b1020; color:#e6eaf2; }
+      a { color: #9cc2ff; text-decoration: none; }
+      .card { border:1px solid #2b3555; border-radius:12px; padding:16px; margin:12px 0; background:#111831; }
+      .muted { color:#9aa4bf; }
+    </style>
+  </head>
+  <body>
+    <h1>Mission Control Lite</h1>
+    <p class="muted">Choose a view:</p>
+
+    <div class="card">
+      <h3>Public View (read-only)</h3>
+      <p>See tasks by lane/status. No write actions.</p>
+      <a href="./public.html">Open public view →</a>
+    </div>
+
+    <div class="card">
+      <h3>Admin View (write actions)</h3>
+      <p>Create tasks and move statuses. Requires admin key.</p>
+      <a href="./admin.html">Open admin view →</a>
+    </div>
+  </body>
+</html>
