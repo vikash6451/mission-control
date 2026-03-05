@@ -1,14 +1,13 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-const lanes = ["research", "finance", "sports", "ops"] as const;
-const statuses = ["backlog", "in_progress", "review", "done"] as const;
-
 async function actorId(ctx: { auth: { getUserIdentity: () => Promise<any> } }) {
   const identity = await ctx.auth.getUserIdentity();
-  return (
-    identity?.email ?? identity?.subject ?? identity?.name ?? "unknown-actor"
-  ) as string;
+  return (identity?.email ?? identity?.subject ?? identity?.name ?? "unknown-actor") as string;
+}
+
+function priorityRank(p: "low" | "medium" | "high") {
+  return p === "high" ? 3 : p === "medium" ? 2 : 1;
 }
 
 async function writeAudit(
@@ -31,12 +30,21 @@ async function writeAudit(
   });
 }
 
+async function writeEvent(ctx: any, actor: string, type: string, taskId?: any, lane?: string, details?: string) {
+  await ctx.db.insert("events", {
+    taskId,
+    lane,
+    actor,
+    type,
+    details,
+    at: Date.now(),
+  });
+}
+
 export const listTasks = query({
   args: {
     lane: v.optional(v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops"))),
-    status: v.optional(
-      v.union(v.literal("backlog"), v.literal("in_progress"), v.literal("review"), v.literal("done")),
-    ),
+    status: v.optional(v.union(v.literal("backlog"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
   },
   handler: async (ctx, args) => {
     if (args.lane && args.status) {
@@ -45,18 +53,8 @@ export const listTasks = query({
         .withIndex("by_lane_status", (q) => q.eq("lane", args.lane!).eq("status", args.status!))
         .collect();
     }
-    if (args.lane) {
-      return await ctx.db
-        .query("tasks")
-        .withIndex("by_lane", (q) => q.eq("lane", args.lane!))
-        .collect();
-    }
-    if (args.status) {
-      return await ctx.db
-        .query("tasks")
-        .withIndex("by_status", (q) => q.eq("status", args.status!))
-        .collect();
-    }
+    if (args.lane) return await ctx.db.query("tasks").withIndex("by_lane", (q) => q.eq("lane", args.lane!)).collect();
+    if (args.status) return await ctx.db.query("tasks").withIndex("by_status", (q) => q.eq("status", args.status!)).collect();
     return await ctx.db.query("tasks").collect();
   },
 });
@@ -86,7 +84,41 @@ export const createTask = mutation({
       updatedAt: now,
     });
     await writeAudit(ctx, "create_task", "task", id, args.lane, args.title);
+    await writeEvent(ctx, actor, "task_created", id, args.lane, args.title);
     return id;
+  },
+});
+
+export const claimNextTask = mutation({
+  args: {
+    lane: v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops")),
+    agent: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const backlog = await ctx.db
+      .query("tasks")
+      .withIndex("by_lane_status", (q) => q.eq("lane", args.lane).eq("status", "backlog"))
+      .collect();
+
+    if (!backlog.length) return { ok: true, task: null };
+
+    backlog.sort((a, b) => {
+      const p = priorityRank(b.priority) - priorityRank(a.priority);
+      if (p !== 0) return p;
+      return a.createdAt - b.createdAt;
+    });
+
+    const task = backlog[0];
+    await ctx.db.patch(task._id, {
+      status: "in_progress",
+      ownerAgent: args.agent,
+      updatedAt: Date.now(),
+    });
+
+    await writeAudit(ctx, "claim_task", "task", task._id, task.lane, `${args.agent} claimed`);
+    await writeEvent(ctx, args.agent, "task_claimed", task._id, task.lane, task.title);
+
+    return { ok: true, task: { ...task, status: "in_progress", ownerAgent: args.agent } };
   },
 });
 
@@ -105,7 +137,6 @@ export const updateTaskStatus = mutation({
     const actor = (await actorId(ctx)) || "unknown-actor";
     const agent = args.actorAgent ?? actor;
 
-    // Only main-orchestrator can mark done.
     if (args.status === "done" && agent !== "main-orchestrator") {
       throw new Error("Only main-orchestrator can move a task to done");
     }
@@ -118,16 +149,39 @@ export const updateTaskStatus = mutation({
       verifiedBy: args.status === "done" ? agent : task.verifiedBy,
     });
 
-    await writeAudit(
-      ctx,
-      "update_task_status",
-      "task",
-      args.taskId,
-      task.lane,
-      `${task.status} -> ${args.status} by ${agent}`,
-    );
-
+    await writeAudit(ctx, "update_task_status", "task", args.taskId, task.lane, `${task.status} -> ${args.status} by ${agent}`);
+    await writeEvent(ctx, agent, "task_status_changed", task._id, task.lane, `${task.status} -> ${args.status}`);
     return { ok: true };
+  },
+});
+
+export const addTaskComment = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    authorAgent: v.string(),
+    body: v.string(),
+    kind: v.optional(v.union(v.literal("progress"), v.literal("result"), v.literal("blocker"), v.literal("note"))),
+  },
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    const id = await ctx.db.insert("comments", {
+      taskId: args.taskId,
+      authorAgent: args.authorAgent,
+      body: args.body,
+      kind: args.kind,
+      createdAt: Date.now(),
+    });
+    await writeAudit(ctx, "add_comment", "comment", id, task.lane, args.kind ?? "note");
+    await writeEvent(ctx, args.authorAgent, "task_commented", task._id, task.lane, args.kind ?? "note");
+    return id;
+  },
+});
+
+export const listTaskComments = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    return await ctx.db.query("comments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
   },
 });
 
@@ -143,9 +197,7 @@ export const createHandoff = mutation({
     status: v.optional(v.union(v.literal("queued"), v.literal("done"), v.literal("blocked"))),
   },
   handler: async (ctx, args) => {
-    if (args.fromLane === args.toLane) {
-      throw new Error("Handoff lane must be different");
-    }
+    if (args.fromLane === args.toLane) throw new Error("Handoff lane must be different");
     const now = Date.now();
     const id = await ctx.db.insert("handoffs", {
       taskId: args.taskId,
@@ -159,27 +211,16 @@ export const createHandoff = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    await writeAudit(
-      ctx,
-      "create_handoff",
-      "handoff",
-      id,
-      `${args.fromLane}->${args.toLane}`,
-      args.summary,
-    );
+    await writeAudit(ctx, "create_handoff", "handoff", id, `${args.fromLane}->${args.toLane}`, args.summary);
+    await writeEvent(ctx, args.fromAgent, "handoff_created", args.taskId, `${args.fromLane}->${args.toLane}`, args.summary);
     return id;
   },
 });
 
 export const listHandoffs = query({
-  args: {
-    status: v.optional(v.union(v.literal("queued"), v.literal("done"), v.literal("blocked"))),
-  },
+  args: { status: v.optional(v.union(v.literal("queued"), v.literal("done"), v.literal("blocked"))) },
   handler: async (ctx, args) => {
     if (!args.status) return await ctx.db.query("handoffs").collect();
-    return await ctx.db
-      .query("handoffs")
-      .withIndex("by_status", (q) => q.eq("status", args.status!))
-      .collect();
+    return await ctx.db.query("handoffs").withIndex("by_status", (q) => q.eq("status", args.status!)).collect();
   },
 });

@@ -21,16 +21,28 @@ function json(data: unknown, status = 200) {
       "content-type": "application/json",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-      "access-control-allow-headers": "content-type",
+      "access-control-allow-headers": "content-type, x-admin-key",
     },
   });
 }
 
-http.route({
-  path: "/mission-control/tasks",
-  method: "OPTIONS",
-  handler: httpAction(async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PATCH,OPTIONS", "access-control-allow-headers": "content-type" } })),
-});
+function optionsHandler() {
+  return httpAction(async () =>
+    new Response(null, {
+      status: 204,
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
+        "access-control-allow-headers": "content-type, x-admin-key",
+      },
+    }),
+  );
+}
+
+http.route({ path: "/mission-control/tasks", method: "OPTIONS", handler: optionsHandler() });
+http.route({ path: "/mission-control/tasks/status", method: "OPTIONS", handler: optionsHandler() });
+http.route({ path: "/mission-control/tasks/claim", method: "OPTIONS", handler: optionsHandler() });
+http.route({ path: "/mission-control/tasks/comment", method: "OPTIONS", handler: optionsHandler() });
 
 http.route({
   path: "/mission-control/tasks",
@@ -39,12 +51,7 @@ http.route({
     const url = new URL(req.url);
     const lane = url.searchParams.get("lane") || undefined;
     const status = url.searchParams.get("status") || undefined;
-
-    const tasks = await ctx.runQuery(api.missionControl.listTasks, {
-      lane: lane as any,
-      status: status as any,
-    });
-
+    const tasks = await ctx.runQuery(api.missionControl.listTasks, { lane: lane as any, status: status as any });
     return json({ tasks });
   }),
 });
@@ -55,10 +62,7 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
     const body = await req.json();
-    if (!body?.title || !body?.lane) {
-      return json({ error: "title and lane are required" }, 400);
-    }
-
+    if (!body?.title || !body?.lane) return json({ error: "title and lane are required" }, 400);
     const taskId = await ctx.runMutation(api.missionControl.createTask, {
       title: body.title,
       description: body.description,
@@ -67,15 +71,8 @@ http.route({
       ownerAgent: body.ownerAgent,
       contextPaths: body.contextPaths,
     });
-
     return json({ ok: true, taskId });
   }),
-});
-
-http.route({
-  path: "/mission-control/tasks/status",
-  method: "OPTIONS",
-  handler: httpAction(async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PATCH,OPTIONS", "access-control-allow-headers": "content-type" } })),
 });
 
 http.route({
@@ -84,10 +81,7 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
     const body = await req.json();
-    if (!body?.taskId || !body?.status) {
-      return json({ error: "taskId and status are required" }, 400);
-    }
-
+    if (!body?.taskId || !body?.status) return json({ error: "taskId and status are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.updateTaskStatus, {
       taskId: body.taskId,
       status: body.status,
@@ -95,8 +89,41 @@ http.route({
       notes: body.notes,
       actorAgent: body.actorAgent,
     });
-
     return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/tasks/claim",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.lane || !body?.agent) return json({ error: "lane and agent are required" }, 400);
+    const result = await ctx.runMutation(api.missionControl.claimNextTask, {
+      lane: body.lane,
+      agent: body.agent,
+    });
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/tasks/comment",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.taskId || !body?.authorAgent || !body?.body) {
+      return json({ error: "taskId, authorAgent, body are required" }, 400);
+    }
+    const commentId = await ctx.runMutation(api.missionControl.addTaskComment, {
+      taskId: body.taskId,
+      authorAgent: body.authorAgent,
+      body: body.body,
+      kind: body.kind,
+    });
+    return json({ ok: true, commentId });
   }),
 });
 

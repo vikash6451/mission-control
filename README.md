@@ -20,6 +20,21 @@ npx convex deploy --yes --preview-create mission-control-lite
 ## Deploy frontend (Cloudflare Pages)
 Deploy only `apps/mission-control-lite` folder.
 
+## Research-agent pilot loop
+
+A starter loop script is included at:
+- `scripts/research_agent_cycle.py`
+
+Required env:
+- `MISSION_CONTROL_ADMIN_KEY`
+- optional `MISSION_CONTROL_BASE` (defaults to current Convex .site URL)
+
+Run:
+
+```bash
+python3 scripts/research_agent_cycle.py
+```
+
 ## Security note
 Current admin gating uses `x-admin-key` in HTTP routes.
 Set `MISSION_CONTROL_ADMIN_KEY` in Convex env for production.
