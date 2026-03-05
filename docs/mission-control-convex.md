@@ -1,8 +1,8 @@
 # Mission Control Lite (Convex) — v1
 
 Current deployed backend:
-- Cloud: `https://flexible-manatee-126.convex.cloud`
-- HTTP API base: `https://flexible-manatee-126.convex.site/mission-control`
+- Cloud: `https://fabulous-dog-776.convex.cloud`
+- HTTP API base: `https://fabulous-dog-776.convex.site/mission-control`
 
 ## What is implemented
 
