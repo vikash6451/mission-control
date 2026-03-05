@@ -21,6 +21,8 @@ export default defineSchema({
     description: v.string(),
     acceptanceCriteria: v.string(),
     outputFormat: v.string(),
+    minSources: v.optional(v.number()),
+    requireCounterpoints: v.optional(v.boolean()),
     dueAt: v.optional(v.number()),
     lane,
     status,

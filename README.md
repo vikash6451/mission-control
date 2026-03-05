@@ -5,6 +5,7 @@ Lightweight taskboard with lane isolation:
 - Status flow: backlog -> in_progress -> review -> done
 - Only `main-orchestrator` can mark done
 - Public read-only view + Admin view split
+- L3 research contract fields: acceptance criteria, output format, min sources, counterpoint requirement
 
 ## Structure
 - `apps/mission-control-lite/` static UI (public/admin)

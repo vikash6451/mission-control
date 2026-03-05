@@ -71,6 +71,8 @@ http.route({
       description: body.description,
       acceptanceCriteria: body.acceptanceCriteria,
       outputFormat: body.outputFormat,
+      minSources: body.minSources,
+      requireCounterpoints: body.requireCounterpoints,
       dueAt: body.dueAt,
       lane: body.lane,
       priority: body.priority,

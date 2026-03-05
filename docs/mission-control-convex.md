@@ -1,8 +1,8 @@
 # Mission Control Lite (Convex) — v1
 
 Current deployed backend:
-- Cloud: `https://aromatic-okapi-179.convex.cloud`
-- HTTP API base: `https://aromatic-okapi-179.convex.site/mission-control`
+- Cloud: `https://adamant-cassowary-648.convex.cloud`
+- HTTP API base: `https://adamant-cassowary-648.convex.site/mission-control`
 
 ## What is implemented
 

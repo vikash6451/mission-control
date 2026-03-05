@@ -29,7 +29,7 @@
     </table>
 
     <script>
-      const BASE = "https://brazen-fly-288.convex.site/mission-control";
+      const BASE = "https://adamant-cassowary-648.convex.site/mission-control";
       const esc = (v)=>String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
       async function loadTasks() {
         const lane = document.getElementById("laneFilter").value;
@@ -47,6 +47,7 @@
             <div class="task-desc">${esc(t.description||'')}</div>
             <div class="muted">Acceptance: ${esc(t.acceptanceCriteria||'')}</div>
             <div class="muted">Output: ${esc(t.outputFormat||'')}</div>
+            <div class="muted">L3: minSources=${esc(t.minSources ?? 3)} | counterpoints=${t.requireCounterpoints === false ? 'no':'yes'}</div>
             ${t.dueAt ? `<div class="muted">Due: ${new Date(t.dueAt).toLocaleString()}</div>` : ""}
             ${t.contextPaths?.length ? `<div class="muted">Context: ${esc(t.contextPaths.join(', '))}</div>` : ""}
           </td><td><span class="pill">${esc(t.lane)}</span></td><td>${esc(t.status)}</td><td>${esc(t.ownerAgent || '-')}</td>`;
