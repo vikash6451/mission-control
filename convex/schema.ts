@@ -18,12 +18,17 @@ const status = v.union(
 export default defineSchema({
   tasks: defineTable({
     title: v.string(),
-    description: v.optional(v.string()),
+    description: v.string(),
+    acceptanceCriteria: v.string(),
+    outputFormat: v.string(),
+    dueAt: v.optional(v.number()),
     lane,
     status,
     priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
     createdBy: v.string(),
     ownerAgent: v.optional(v.string()),
+    claimExpiresAt: v.optional(v.number()),
+    resultLinks: v.optional(v.array(v.string())),
     contextPaths: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
     createdAt: v.number(),
@@ -39,6 +44,7 @@ export default defineSchema({
     authorAgent: v.string(),
     body: v.string(),
     kind: v.optional(v.union(v.literal("progress"), v.literal("result"), v.literal("blocker"), v.literal("note"))),
+    resultLinks: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_task", ["taskId"]),
 

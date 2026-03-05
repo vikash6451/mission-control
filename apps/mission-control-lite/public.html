@@ -18,24 +18,8 @@
   <body>
     <h1>Mission Control — Public (Read-only)</h1>
     <div class="row">
-      <label>Lane
-        <select id="laneFilter">
-          <option value="">all</option>
-          <option value="research">research</option>
-          <option value="finance">finance</option>
-          <option value="sports">sports</option>
-          <option value="ops">ops</option>
-        </select>
-      </label>
-      <label>Status
-        <select id="statusFilter">
-          <option value="">all</option>
-          <option value="backlog">backlog</option>
-          <option value="in_progress">in_progress</option>
-          <option value="review">review</option>
-          <option value="done">done</option>
-        </select>
-      </label>
+      <label>Lane <select id="laneFilter"><option value="">all</option><option>research</option><option>finance</option><option>sports</option><option>ops</option></select></label>
+      <label>Status <select id="statusFilter"><option value="">all</option><option>backlog</option><option>in_progress</option><option>review</option><option>done</option></select></label>
       <button id="refreshBtn">Refresh</button>
     </div>
 
@@ -45,17 +29,8 @@
     </table>
 
     <script>
-      const BASE = "https://aromatic-okapi-179.convex.site/mission-control";
-
-      function esc(v) {
-        return String(v || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/\"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
-
+      const BASE = "https://brazen-fly-288.convex.site/mission-control";
+      const esc = (v)=>String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
       async function loadTasks() {
         const lane = document.getElementById("laneFilter").value;
         const status = document.getElementById("statusFilter").value;
@@ -68,15 +43,13 @@
         rows.innerHTML = "";
         (data.tasks || []).sort((a,b)=>b.updatedAt-a.updatedAt).forEach(t=>{
           const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>
-              <div>${esc(t.title)}</div>
-              ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ""}
-              ${t.contextPaths?.length ? `<div class="muted">Context: ${esc(t.contextPaths.join(", "))}</div>` : ""}
-            </td>
-            <td><span class="pill">${esc(t.lane)}</span></td>
-            <td>${esc(t.status)}</td>
-            <td>${esc(t.ownerAgent || '-')}</td>`;
+          tr.innerHTML = `<td><div>${esc(t.title)}</div>
+            <div class="task-desc">${esc(t.description||'')}</div>
+            <div class="muted">Acceptance: ${esc(t.acceptanceCriteria||'')}</div>
+            <div class="muted">Output: ${esc(t.outputFormat||'')}</div>
+            ${t.dueAt ? `<div class="muted">Due: ${new Date(t.dueAt).toLocaleString()}</div>` : ""}
+            ${t.contextPaths?.length ? `<div class="muted">Context: ${esc(t.contextPaths.join(', '))}</div>` : ""}
+          </td><td><span class="pill">${esc(t.lane)}</span></td><td>${esc(t.status)}</td><td>${esc(t.ownerAgent || '-')}</td>`;
           rows.appendChild(tr);
         })
       }

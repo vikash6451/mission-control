@@ -8,7 +8,7 @@
       body { font-family: Arial, sans-serif; margin: 24px; background:#0b1020; color:#e6eaf2; }
       .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
       select, input, textarea, button { padding:8px; border-radius:8px; border:1px solid #2b3555; background:#111831; color:#e6eaf2; }
-      textarea { min-height: 80px; min-width: 520px; }
+      textarea { min-height: 70px; min-width: 520px; }
       table { width:100%; border-collapse: collapse; margin-top:12px; }
       th, td { padding:10px; border-bottom:1px solid #26304e; text-align:left; font-size:14px; vertical-align: top; }
       .pill { padding:2px 8px; border-radius:999px; border:1px solid #425082; font-size:12px; }
@@ -27,41 +27,26 @@
 
     <div class="row">
       <label>Lane
-        <select id="laneFilter">
-          <option value="">all</option>
-          <option value="research">research</option>
-          <option value="finance">finance</option>
-          <option value="sports">sports</option>
-          <option value="ops">ops</option>
-        </select>
+        <select id="laneFilter"><option value="">all</option><option>research</option><option>finance</option><option>sports</option><option>ops</option></select>
       </label>
       <label>Status
-        <select id="statusFilter">
-          <option value="">all</option>
-          <option value="backlog">backlog</option>
-          <option value="in_progress">in_progress</option>
-          <option value="review">review</option>
-          <option value="done">done</option>
-        </select>
+        <select id="statusFilter"><option value="">all</option><option>backlog</option><option>in_progress</option><option>review</option><option>done</option></select>
       </label>
       <button id="refreshBtn">Refresh</button>
     </div>
 
     <div class="row">
-      <input id="newTitle" placeholder="New task title" size="40" />
-      <select id="newLane">
-        <option value="research">research</option>
-        <option value="finance">finance</option>
-        <option value="sports">sports</option>
-        <option value="ops">ops</option>
-      </select>
-      <input id="newContextPaths" placeholder="Context paths (comma-separated, optional)" size="56" />
-      <button id="createBtn">Create Task</button>
+      <input id="newTitle" placeholder="Task title" size="36" />
+      <select id="newLane"><option>research</option><option>finance</option><option>sports</option><option>ops</option></select>
+      <select id="newPriority"><option>medium</option><option>high</option><option>low</option></select>
+      <input id="newDueAt" type="datetime-local" />
+      <input id="newContextPaths" placeholder="Context paths (comma-separated, optional)" size="40" />
     </div>
 
-    <div class="row">
-      <textarea id="newDescription" placeholder="Task description (what exactly should be done, expected output, constraints)"></textarea>
-    </div>
+    <div class="row"><textarea id="newDescription" placeholder="Description (required)"></textarea></div>
+    <div class="row"><textarea id="newAcceptanceCriteria" placeholder="Acceptance criteria (required)"></textarea></div>
+    <div class="row"><textarea id="newOutputFormat" placeholder="Output format (required)"></textarea></div>
+    <div class="row"><button id="createBtn">Create Task</button></div>
 
     <table>
       <thead><tr><th>Task</th><th>Lane</th><th>Status</th><th>Owner</th><th>Action</th></tr></thead>
@@ -69,23 +54,12 @@
     </table>
 
     <script>
-      const BASE = "https://aromatic-okapi-179.convex.site/mission-control";
+      const BASE = "https://brazen-fly-288.convex.site/mission-control";
       const statuses = ["backlog", "in_progress", "review", "done"];
+      const getKey = () => localStorage.getItem("mc_admin_key") || "";
+      const esc = (v)=>String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
 
-      function getKey() { return localStorage.getItem("mc_admin_key") || ""; }
-      function saveKey() {
-        localStorage.setItem("mc_admin_key", document.getElementById("adminKey").value.trim());
-        alert("Saved");
-      }
-
-      function esc(v) {
-        return String(v || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/\"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
+      function saveKey(){ localStorage.setItem("mc_admin_key", document.getElementById("adminKey").value.trim()); alert("Saved"); }
 
       async function loadTasks() {
         const lane = document.getElementById("laneFilter").value;
@@ -100,16 +74,13 @@
         (data.tasks || []).sort((a,b)=>b.updatedAt-a.updatedAt).forEach(t=>{
           const options = statuses.filter(s => s !== t.status).map(s=>`<option value="${s}">${s}</option>`).join("");
           const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>
-              <div>${esc(t.title)}</div>
-              ${t.description ? `<div class="task-desc">${esc(t.description)}</div>` : ""}
-              ${t.contextPaths?.length ? `<div class="muted">Context: ${esc(t.contextPaths.join(", "))}</div>` : ""}
-            </td>
-            <td><span class="pill">${esc(t.lane)}</span></td>
-            <td>${esc(t.status)}</td>
-            <td>${esc(t.ownerAgent || '-')}</td>
-            <td><select id="s-${t._id}">${options}</select><button onclick="moveStatus('${t._id}')">Move</button></td>`;
+          tr.innerHTML = `<td><div>${esc(t.title)}</div>
+            <div class="task-desc">${esc(t.description||'')}</div>
+            <div class="muted">Acceptance: ${esc(t.acceptanceCriteria||'')}</div>
+            <div class="muted">Output: ${esc(t.outputFormat||'')}</div>
+            ${t.dueAt ? `<div class="muted">Due: ${new Date(t.dueAt).toLocaleString()}</div>` : ""}
+            ${t.contextPaths?.length ? `<div class="muted">Context: ${esc(t.contextPaths.join(', '))}</div>` : ""}
+          </td><td><span class="pill">${esc(t.lane)}</span></td><td>${esc(t.status)}</td><td>${esc(t.ownerAgent || '-')}</td><td><select id="s-${t._id}">${options}</select><button onclick="moveStatus('${t._id}')">Move</button><button onclick="markBlocked('${t._id}')">Block</button></td>`;
           rows.appendChild(tr);
         });
       }
@@ -117,25 +88,26 @@
       async function createTask() {
         const title = document.getElementById("newTitle").value.trim();
         const lane = document.getElementById("newLane").value;
+        const priority = document.getElementById("newPriority").value;
         const description = document.getElementById("newDescription").value.trim();
+        const acceptanceCriteria = document.getElementById("newAcceptanceCriteria").value.trim();
+        const outputFormat = document.getElementById("newOutputFormat").value.trim();
+        const dueAtRaw = document.getElementById("newDueAt").value;
+        const dueAt = dueAtRaw ? new Date(dueAtRaw).getTime() : undefined;
         const contextPathsRaw = document.getElementById("newContextPaths").value.trim();
         const contextPaths = contextPathsRaw ? contextPathsRaw.split(",").map(s=>s.trim()).filter(Boolean) : undefined;
 
-        if (!title) return alert("Title is required");
+        if (!title || !description || !acceptanceCriteria || !outputFormat) return alert("Title, description, acceptance criteria, output format are required");
         const res = await fetch(BASE + "/tasks", {
           method: "POST",
           headers: { "content-type": "application/json", "x-admin-key": getKey() },
-          body: JSON.stringify({ title, lane, description, contextPaths })
+          body: JSON.stringify({ title, lane, priority, description, acceptanceCriteria, outputFormat, dueAt, contextPaths })
         });
-
         if (!res.ok) {
           const err = await res.json().catch(()=>({error:"Create failed"}));
           return alert(`Create failed: ${err.error || 'check admin key'}`);
         }
-
-        document.getElementById("newTitle").value = "";
-        document.getElementById("newDescription").value = "";
-        document.getElementById("newContextPaths").value = "";
+        ["newTitle","newDescription","newAcceptanceCriteria","newOutputFormat","newDueAt","newContextPaths"].forEach(id=>document.getElementById(id).value="");
         loadTasks();
       }
 
@@ -150,6 +122,23 @@
         if (!res.ok) {
           const err = await res.json().catch(()=>({error:"Update failed"}));
           return alert(`Update failed: ${err.error || 'check admin key / actor role'}`);
+        }
+        loadTasks();
+      }
+
+      async function markBlocked(taskId) {
+        const blockerReason = prompt("Blocker reason (required)");
+        if (!blockerReason) return;
+        const handoffToAgent = prompt("Handoff to agent (optional)", "");
+        const handoffToLane = handoffToAgent ? prompt("Handoff lane (research|finance|sports|ops)", "ops") : "";
+        const res = await fetch(BASE + "/tasks/blocked", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-key": getKey() },
+          body: JSON.stringify({ taskId, actorAgent: "research-agent", blockerReason, handoffToAgent: handoffToAgent || undefined, handoffToLane: handoffToLane || undefined })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({error:"Block failed"}));
+          return alert(`Block failed: ${err.error || 'check admin key'}`);
         }
         loadTasks();
       }

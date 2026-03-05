@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+const CLAIM_TTL_MS = 45 * 60 * 1000;
+
 async function actorId(ctx: { auth: { getUserIdentity: () => Promise<any> } }) {
   const identity = await ctx.auth.getUserIdentity();
   return (identity?.email ?? identity?.subject ?? identity?.name ?? "unknown-actor") as string;
@@ -19,27 +21,30 @@ async function writeAudit(
   details?: string,
 ) {
   const actor = await actorId(ctx);
-  await ctx.db.insert("auditLog", {
-    actor,
-    action,
-    entity,
-    entityId,
-    lane,
-    details,
-    at: Date.now(),
-  });
+  await ctx.db.insert("auditLog", { actor, action, entity, entityId, lane, details, at: Date.now() });
 }
 
 async function writeEvent(ctx: any, actor: string, type: string, taskId?: any, lane?: string, details?: string) {
-  await ctx.db.insert("events", {
-    taskId,
-    lane,
-    actor,
-    type,
-    details,
-    at: Date.now(),
-  });
+  await ctx.db.insert("events", { taskId, lane, actor, type, details, at: Date.now() });
 }
+
+export const releaseExpiredClaims = mutation({
+  args: { lane: v.optional(v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops"))) },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const inProg = await ctx.db.query("tasks").withIndex("by_status", (q) => q.eq("status", "in_progress")).collect();
+    let released = 0;
+    for (const t of inProg) {
+      if (args.lane && t.lane !== args.lane) continue;
+      if (t.claimExpiresAt && t.claimExpiresAt < now) {
+        await ctx.db.patch(t._id, { status: "backlog", ownerAgent: undefined, claimExpiresAt: undefined, updatedAt: now });
+        released += 1;
+        await writeEvent(ctx, "system", "claim_released", t._id, t.lane, "TTL expired");
+      }
+    }
+    return { ok: true, released };
+  },
+});
 
 export const listTasks = query({
   args: {
@@ -47,12 +52,7 @@ export const listTasks = query({
     status: v.optional(v.union(v.literal("backlog"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
   },
   handler: async (ctx, args) => {
-    if (args.lane && args.status) {
-      return await ctx.db
-        .query("tasks")
-        .withIndex("by_lane_status", (q) => q.eq("lane", args.lane!).eq("status", args.status!))
-        .collect();
-    }
+    if (args.lane && args.status) return await ctx.db.query("tasks").withIndex("by_lane_status", (q) => q.eq("lane", args.lane!).eq("status", args.status!)).collect();
     if (args.lane) return await ctx.db.query("tasks").withIndex("by_lane", (q) => q.eq("lane", args.lane!)).collect();
     if (args.status) return await ctx.db.query("tasks").withIndex("by_status", (q) => q.eq("status", args.status!)).collect();
     return await ctx.db.query("tasks").collect();
@@ -62,7 +62,10 @@ export const listTasks = query({
 export const createTask = mutation({
   args: {
     title: v.string(),
-    description: v.optional(v.string()),
+    description: v.string(),
+    acceptanceCriteria: v.string(),
+    outputFormat: v.string(),
+    dueAt: v.optional(v.number()),
     lane: v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops")),
     priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     ownerAgent: v.optional(v.string()),
@@ -74,6 +77,9 @@ export const createTask = mutation({
     const id = await ctx.db.insert("tasks", {
       title: args.title,
       description: args.description,
+      acceptanceCriteria: args.acceptanceCriteria,
+      outputFormat: args.outputFormat,
+      dueAt: args.dueAt,
       lane: args.lane,
       status: "backlog",
       priority: args.priority ?? "medium",
@@ -90,16 +96,18 @@ export const createTask = mutation({
 });
 
 export const claimNextTask = mutation({
-  args: {
-    lane: v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops")),
-    agent: v.string(),
-  },
+  args: { lane: v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops")), agent: v.string() },
   handler: async (ctx, args) => {
-    const backlog = await ctx.db
-      .query("tasks")
-      .withIndex("by_lane_status", (q) => q.eq("lane", args.lane).eq("status", "backlog"))
-      .collect();
+    const now = Date.now();
+    const inProg = await ctx.db.query("tasks").withIndex("by_status", (q) => q.eq("status", "in_progress")).collect();
+    for (const t of inProg) {
+      if (t.lane === args.lane && t.claimExpiresAt && t.claimExpiresAt < now) {
+        await ctx.db.patch(t._id, { status: "backlog", ownerAgent: undefined, claimExpiresAt: undefined, updatedAt: now });
+        await writeEvent(ctx, "system", "claim_released", t._id, t.lane, "TTL expired");
+      }
+    }
 
+    const backlog = await ctx.db.query("tasks").withIndex("by_lane_status", (q) => q.eq("lane", args.lane).eq("status", "backlog")).collect();
     if (!backlog.length) return { ok: true, task: null };
 
     backlog.sort((a, b) => {
@@ -112,13 +120,14 @@ export const claimNextTask = mutation({
     await ctx.db.patch(task._id, {
       status: "in_progress",
       ownerAgent: args.agent,
-      updatedAt: Date.now(),
+      claimExpiresAt: now + CLAIM_TTL_MS,
+      updatedAt: now,
     });
 
     await writeAudit(ctx, "claim_task", "task", task._id, task.lane, `${args.agent} claimed`);
     await writeEvent(ctx, args.agent, "task_claimed", task._id, task.lane, task.title);
 
-    return { ok: true, task: { ...task, status: "in_progress", ownerAgent: args.agent } };
+    return { ok: true, task: { ...task, status: "in_progress", ownerAgent: args.agent, claimExpiresAt: now + CLAIM_TTL_MS } };
   },
 });
 
@@ -128,6 +137,7 @@ export const updateTaskStatus = mutation({
     status: v.union(v.literal("backlog"), v.literal("in_progress"), v.literal("review"), v.literal("done")),
     ownerAgent: v.optional(v.string()),
     notes: v.optional(v.string()),
+    resultLinks: v.optional(v.array(v.string())),
     actorAgent: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -136,15 +146,14 @@ export const updateTaskStatus = mutation({
 
     const actor = (await actorId(ctx)) || "unknown-actor";
     const agent = args.actorAgent ?? actor;
-
-    if (args.status === "done" && agent !== "main-orchestrator") {
-      throw new Error("Only main-orchestrator can move a task to done");
-    }
+    if (args.status === "done" && agent !== "main-orchestrator") throw new Error("Only main-orchestrator can move a task to done");
 
     await ctx.db.patch(args.taskId, {
       status: args.status,
       ownerAgent: args.ownerAgent ?? task.ownerAgent,
       notes: args.notes ?? task.notes,
+      claimExpiresAt: args.status === "in_progress" ? task.claimExpiresAt : undefined,
+      resultLinks: args.resultLinks ?? task.resultLinks,
       updatedAt: Date.now(),
       verifiedBy: args.status === "done" ? agent : task.verifiedBy,
     });
@@ -161,6 +170,7 @@ export const addTaskComment = mutation({
     authorAgent: v.string(),
     body: v.string(),
     kind: v.optional(v.union(v.literal("progress"), v.literal("result"), v.literal("blocker"), v.literal("note"))),
+    resultLinks: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.taskId);
@@ -170,6 +180,7 @@ export const addTaskComment = mutation({
       authorAgent: args.authorAgent,
       body: args.body,
       kind: args.kind,
+      resultLinks: args.resultLinks,
       createdAt: Date.now(),
     });
     await writeAudit(ctx, "add_comment", "comment", id, task.lane, args.kind ?? "note");
@@ -178,11 +189,55 @@ export const addTaskComment = mutation({
   },
 });
 
+export const markTaskBlocked = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    actorAgent: v.string(),
+    blockerReason: v.string(),
+    handoffToAgent: v.optional(v.string()),
+    handoffToLane: v.optional(v.union(v.literal("research"), v.literal("finance"), v.literal("sports"), v.literal("ops"))),
+  },
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+
+    await ctx.db.patch(args.taskId, {
+      status: "review",
+      notes: `BLOCKED: ${args.blockerReason}`,
+      claimExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    const commentId = await ctx.db.insert("comments", {
+      taskId: args.taskId,
+      authorAgent: args.actorAgent,
+      body: args.blockerReason,
+      kind: "blocker",
+      createdAt: Date.now(),
+    });
+    await writeAudit(ctx, "add_comment", "comment", commentId, task.lane, "blocker");
+
+    if (args.handoffToAgent && args.handoffToLane) {
+      await ctx.runMutation((exports as any).createHandoff, {
+        taskId: args.taskId,
+        fromAgent: args.actorAgent,
+        toAgent: args.handoffToAgent,
+        fromLane: task.lane,
+        toLane: args.handoffToLane,
+        summary: `Blocked: ${task.title}`,
+        context: args.blockerReason,
+        status: "queued",
+      });
+    }
+
+    await writeEvent(ctx, args.actorAgent, "task_blocked", task._id, task.lane, args.blockerReason);
+    return { ok: true };
+  },
+});
+
 export const listTaskComments = query({
   args: { taskId: v.id("tasks") },
-  handler: async (ctx, args) => {
-    return await ctx.db.query("comments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
-  },
+  handler: async (ctx, args) => await ctx.db.query("comments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect(),
 });
 
 export const createHandoff = mutation({

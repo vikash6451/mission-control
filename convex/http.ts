@@ -43,6 +43,7 @@ http.route({ path: "/mission-control/tasks", method: "OPTIONS", handler: options
 http.route({ path: "/mission-control/tasks/status", method: "OPTIONS", handler: optionsHandler() });
 http.route({ path: "/mission-control/tasks/claim", method: "OPTIONS", handler: optionsHandler() });
 http.route({ path: "/mission-control/tasks/comment", method: "OPTIONS", handler: optionsHandler() });
+http.route({ path: "/mission-control/tasks/blocked", method: "OPTIONS", handler: optionsHandler() });
 
 http.route({
   path: "/mission-control/tasks",
@@ -62,10 +63,15 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
     const body = await req.json();
-    if (!body?.title || !body?.lane) return json({ error: "title and lane are required" }, 400);
+    if (!body?.title || !body?.lane || !body?.description || !body?.acceptanceCriteria || !body?.outputFormat) {
+      return json({ error: "title, lane, description, acceptanceCriteria, outputFormat are required" }, 400);
+    }
     const taskId = await ctx.runMutation(api.missionControl.createTask, {
       title: body.title,
       description: body.description,
+      acceptanceCriteria: body.acceptanceCriteria,
+      outputFormat: body.outputFormat,
+      dueAt: body.dueAt,
       lane: body.lane,
       priority: body.priority,
       ownerAgent: body.ownerAgent,
@@ -87,6 +93,7 @@ http.route({
       status: body.status,
       ownerAgent: body.ownerAgent,
       notes: body.notes,
+      resultLinks: body.resultLinks,
       actorAgent: body.actorAgent,
     });
     return json(result);
@@ -122,8 +129,29 @@ http.route({
       authorAgent: body.authorAgent,
       body: body.body,
       kind: body.kind,
+      resultLinks: body.resultLinks,
     });
     return json({ ok: true, commentId });
+  }),
+});
+
+http.route({
+  path: "/mission-control/tasks/blocked",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.taskId || !body?.actorAgent || !body?.blockerReason) {
+      return json({ error: "taskId, actorAgent, blockerReason are required" }, 400);
+    }
+    const result = await ctx.runMutation(api.missionControl.markTaskBlocked, {
+      taskId: body.taskId,
+      actorAgent: body.actorAgent,
+      blockerReason: body.blockerReason,
+      handoffToAgent: body.handoffToAgent,
+      handoffToLane: body.handoffToLane,
+    });
+    return json(result);
   }),
 });
 
