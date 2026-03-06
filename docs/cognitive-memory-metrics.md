@@ -30,3 +30,12 @@
 - Reporting endpoint: `GET /mission-control/memory/metrics`.
 - Scripted report: `scripts/memory_metrics_report.py`.
 - Seeded end-to-end validation: `scripts/memory_seeded_e2e.py` (remember -> recall -> review -> metrics).
+- Digest ingestion pipeline: `scripts/ingest_digests_to_memory.py` (normalize -> quality gate -> dedupe -> scoped remember).
+
+## Ingestion best-practice defaults
+
+- Normalize each digest item to structured fields (`claim`, `evidence`, `url`, `author`, `published_at`, `tags`).
+- Assign reliability priors by source type (newsletter > hn > twitter > reddit by default) and raise confidence only with supporting signals (numbers, evidence, URL).
+- Route memory into multiple scopes (`research/global`, `research/signals/market`, optional `research/client/*`) to reduce cross-topic contamination.
+- Cap daily writes and filter low-quality items to avoid memory flooding.
+- Add deterministic fingerprints to memory content for stable dedupe across repeated digests.

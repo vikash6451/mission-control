@@ -11,6 +11,7 @@ import requests
 BASE = os.getenv("MISSION_CONTROL_BASE", "https://dutiful-goshawk-499.convex.site/mission-control")
 ADMIN_KEY = os.getenv("MISSION_CONTROL_ADMIN_KEY", "")
 MEMORY_SCOPE = os.getenv("MISSION_CONTROL_MEMORY_SCOPE", "research")
+MEMORY_SCOPES = [s.strip() for s in os.getenv("MISSION_CONTROL_MEMORY_SCOPES", f"{MEMORY_SCOPE},research/global,research/signals/market").split(",") if s.strip()]
 
 if not ADMIN_KEY:
     print("ERROR: MISSION_CONTROL_ADMIN_KEY is required")
@@ -37,6 +38,49 @@ def patch(path: str, payload: dict):
 def extract_urls(*chunks):
     s = "\n".join([c for c in chunks if c])
     return list(dict.fromkeys(URL_RE.findall(s)))
+
+
+def recall_multi_scope(query_text: str, top_k_per_scope: int = 4):
+    recalls = []
+    merged = []
+
+    for scope in MEMORY_SCOPES:
+        r = post("/memory/recall", {"scope": scope, "query": query_text, "topK": top_k_per_scope})
+        recalls.append({"scope": scope, "raw": r})
+        for m in r.get("memories", []):
+            mm = dict(m)
+            mm["scope"] = scope
+            merged.append(mm)
+
+    merged.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Deduplicate by exact content so repeated facts across scopes don't spam context.
+    dedup = []
+    seen = set()
+    for m in merged:
+        c = (m.get("content") or "").strip().lower()
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        dedup.append(m)
+
+    any_medium_plus = any((r["raw"].get("confidenceBand") in ("medium", "high")) for r in recalls)
+    all_require_review = bool(recalls) and all(r["raw"].get("requiresReview") for r in recalls)
+
+    evidence_gaps = []
+    for r in recalls:
+        for g in r["raw"].get("evidence_gaps", []):
+            if g not in evidence_gaps:
+                evidence_gaps.append(g)
+
+    return {
+        "recalls": recalls,
+        "memories": dedup,
+        "anyMediumPlus": any_medium_plus,
+        "allRequireReview": all_require_review,
+        "evidence_gaps": evidence_gaps,
+        "topConfidence": next((r["raw"].get("confidenceBand") for r in recalls if r["raw"].get("confidenceBand") in ("high", "medium", "low")), "low"),
+    }
 
 
 def run():
@@ -71,18 +115,15 @@ def run():
         print(json.dumps({"ok": False, "taskId": task_id, "blocked": "contract_incomplete"}))
         return
 
-    recall = post(
-        "/memory/recall",
-        {"scope": MEMORY_SCOPE, "query": f"{title}\n{desc}\n{ac}", "topK": 5},
-    )
+    recall = recall_multi_scope(f"{title}\n{desc}\n{ac}", top_k_per_scope=4)
 
-    if recall.get("requiresReview"):
+    if recall.get("allRequireReview") and not recall.get("anyMediumPlus"):
         post(
             "/tasks/blocked",
             {
                 "taskId": task_id,
                 "actorAgent": "research-agent",
-                "blockerReason": "Low-confidence memory recall; manual review required before execution. Gaps: "
+                "blockerReason": "Low-confidence memory recall across all scopes; manual review required before execution. Gaps: "
                 + "; ".join(recall.get("evidence_gaps", [])[:3]),
                 "handoffToAgent": "main-orchestrator",
                 "handoffToLane": "ops",
@@ -94,8 +135,9 @@ def run():
                     "ok": False,
                     "taskId": task_id,
                     "blocked": "low_confidence_memory_recall",
-                    "confidenceBand": recall.get("confidenceBand"),
+                    "confidenceBand": recall.get("topConfidence"),
                     "evidence_gaps": recall.get("evidence_gaps", []),
+                    "scopes": MEMORY_SCOPES,
                 }
             )
         )
@@ -115,8 +157,10 @@ def run():
         print(json.dumps({"ok": False, "taskId": task_id, "blocked": "insufficient_sources", "found": len(urls), "required": min_sources}))
         return
 
-    recalled_lines = recall.get("memories", [])[:3]
-    recalled_text = "\n".join([f"- {m.get('content')} (score={m.get('score')})" for m in recalled_lines]) or "- none"
+    recalled_lines = recall.get("memories", [])[:5]
+    recalled_text = "\n".join([
+        f"- [{m.get('scope')}] {m.get('content')} (score={m.get('score')})" for m in recalled_lines
+    ]) or "- none"
 
     post(
         "/tasks/comment",
@@ -124,7 +168,7 @@ def run():
             "taskId": task_id,
             "authorAgent": "research-agent",
             "kind": "progress",
-            "body": f"Picked up task: {title}. Evidence links found: {len(urls)}. Memory confidence={recall.get('confidenceBand')}.\nRecalled context:\n{recalled_text}",
+            "body": f"Picked up task: {title}. Evidence links found: {len(urls)}. Memory confidence={recall.get('topConfidence')} across scopes {', '.join(MEMORY_SCOPES)}.\nRecalled context:\n{recalled_text}",
             "resultLinks": urls,
         },
     )
@@ -141,7 +185,7 @@ def run():
         {chr(10).join(f'- {u}' for u in urls[:8])}
 
         ## Memory Reuse
-        confidenceBand={recall.get('confidenceBand')} | evidence_gaps={'; '.join(recall.get('evidence_gaps', [])) or 'none'}
+        confidenceBand={recall.get('topConfidence')} | scopes={', '.join(MEMORY_SCOPES)} | evidence_gaps={'; '.join(recall.get('evidence_gaps', [])) or 'none'}
 
         ## Counterpoints
         {counterpoints}
@@ -200,7 +244,7 @@ def run():
                 "movedTo": "review",
                 "sources": len(urls),
                 "confidence": confidence,
-                "memoryConfidenceBand": recall.get("confidenceBand"),
+                "memoryConfidenceBand": recall.get("topConfidence"),
             }
         )
     )
