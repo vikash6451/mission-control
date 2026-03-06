@@ -15,6 +15,8 @@ const status = v.union(
   v.literal("done"),
 );
 
+const memoryStatus = v.union(v.literal("active"), v.literal("superseded"), v.literal("stale"));
+
 export default defineSchema({
   tasks: defineTable({
     title: v.string(),
@@ -83,4 +85,61 @@ export default defineSchema({
     details: v.optional(v.string()),
     at: v.number(),
   }).index("by_entity", ["entity", "entityId"]),
+
+  memories: defineTable({
+    scope: v.string(),
+    subjectKey: v.string(),
+    content: v.string(),
+    fingerprint: v.string(),
+    status: memoryStatus,
+    supersedesMemoryId: v.optional(v.id("memories")),
+    sourceTaskId: v.optional(v.id("tasks")),
+    sourceType: v.optional(v.string()),
+    sourceRef: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    importance: v.optional(v.number()),
+    reliability: v.optional(v.number()),
+    contradictionWithMemoryId: v.optional(v.id("memories")),
+    recallCount: v.optional(v.number()),
+    lastRecalledAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_scope", ["scope"])
+    .index("by_scope_status", ["scope", "status"])
+    .index("by_fingerprint", ["fingerprint"])
+    .index("by_subject", ["scope", "subjectKey"])
+    .index("by_source_task", ["sourceTaskId"]),
+
+  memory_edges: defineTable({
+    scope: v.string(),
+    fromMemoryId: v.id("memories"),
+    toMemoryId: v.id("memories"),
+    relationType: v.union(v.literal("supports"), v.literal("contradicts"), v.literal("derived_from"), v.literal("related")),
+    weight: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_scope", ["scope"])
+    .index("by_from", ["fromMemoryId"])
+    .index("by_to", ["toMemoryId"]),
+
+  memory_recall_logs: defineTable({
+    query: v.string(),
+    scope: v.string(),
+    topK: v.number(),
+    resultMemoryIds: v.array(v.id("memories")),
+    scores: v.array(v.number()),
+    confidenceBand: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    evidenceGaps: v.array(v.string()),
+    reusedCount: v.number(),
+    requiresReview: v.boolean(),
+    actor: v.optional(v.string()),
+    reviewOutcome: v.optional(v.union(v.literal("accepted"), v.literal("rejected"))),
+    reviewedAt: v.optional(v.number()),
+    tokenCostProxy: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_scope", ["scope"])
+    .index("by_time", ["createdAt"])
+    .index("by_confidence", ["confidenceBand"]),
 });

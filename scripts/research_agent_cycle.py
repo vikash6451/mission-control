@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Research-agent L3 pilot loop for Mission Control Lite.
-
-Flow:
-1) claim next research backlog task
-2) validate task contract + evidence minimum
-3) post progress
-4) post structured result (answer, evidence, counterpoints, confidence, gaps)
-5) move to review with result links
-
-If contract/evidence is incomplete -> mark blocked + optional handoff.
-"""
+"""Research-agent L3 pilot loop for Mission Control Lite with cognitive memory hooks."""
 
 import json
 import os
@@ -18,8 +8,9 @@ import sys
 import textwrap
 import requests
 
-BASE = os.getenv("MISSION_CONTROL_BASE", "https://adamant-cassowary-648.convex.site/mission-control")
+BASE = os.getenv("MISSION_CONTROL_BASE", "https://dutiful-goshawk-499.convex.site/mission-control")
 ADMIN_KEY = os.getenv("MISSION_CONTROL_ADMIN_KEY", "")
+MEMORY_SCOPE = os.getenv("MISSION_CONTROL_MEMORY_SCOPE", "research")
 
 if not ADMIN_KEY:
     print("ERROR: MISSION_CONTROL_ADMIN_KEY is required")
@@ -80,6 +71,36 @@ def run():
         print(json.dumps({"ok": False, "taskId": task_id, "blocked": "contract_incomplete"}))
         return
 
+    recall = post(
+        "/memory/recall",
+        {"scope": MEMORY_SCOPE, "query": f"{title}\n{desc}\n{ac}", "topK": 5},
+    )
+
+    if recall.get("requiresReview"):
+        post(
+            "/tasks/blocked",
+            {
+                "taskId": task_id,
+                "actorAgent": "research-agent",
+                "blockerReason": "Low-confidence memory recall; manual review required before execution. Gaps: "
+                + "; ".join(recall.get("evidence_gaps", [])[:3]),
+                "handoffToAgent": "main-orchestrator",
+                "handoffToLane": "ops",
+            },
+        )
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "taskId": task_id,
+                    "blocked": "low_confidence_memory_recall",
+                    "confidenceBand": recall.get("confidenceBand"),
+                    "evidence_gaps": recall.get("evidence_gaps", []),
+                }
+            )
+        )
+        return
+
     if len(urls) < min_sources:
         post(
             "/tasks/blocked",
@@ -94,18 +115,21 @@ def run():
         print(json.dumps({"ok": False, "taskId": task_id, "blocked": "insufficient_sources", "found": len(urls), "required": min_sources}))
         return
 
+    recalled_lines = recall.get("memories", [])[:3]
+    recalled_text = "\n".join([f"- {m.get('content')} (score={m.get('score')})" for m in recalled_lines]) or "- none"
+
     post(
         "/tasks/comment",
         {
             "taskId": task_id,
             "authorAgent": "research-agent",
             "kind": "progress",
-            "body": f"Picked up task: {title}. Evidence links found: {len(urls)}",
+            "body": f"Picked up task: {title}. Evidence links found: {len(urls)}. Memory confidence={recall.get('confidenceBand')}.\nRecalled context:\n{recalled_text}",
             "resultLinks": urls,
         },
     )
 
-    confidence = 0.62 if len(urls) >= min_sources else 0.35
+    confidence = 0.70 if len(urls) >= min_sources else 0.35
     counterpoints = "- Counterpoint: current evidence may be biased toward provided sources." if require_counterpoints else "- Counterpoints not required for this task."
 
     result = textwrap.dedent(
@@ -115,6 +139,9 @@ def run():
 
         ## Evidence ({len(urls)} sources)
         {chr(10).join(f'- {u}' for u in urls[:8])}
+
+        ## Memory Reuse
+        confidenceBand={recall.get('confidenceBand')} | evidence_gaps={'; '.join(recall.get('evidence_gaps', [])) or 'none'}
 
         ## Counterpoints
         {counterpoints}
@@ -141,18 +168,42 @@ def run():
         },
     )
 
+    post(
+        "/memory/extract",
+        {
+            "scope": MEMORY_SCOPE,
+            "text": f"{title}. {desc}. {result}",
+            "sourceTaskId": task_id,
+            "sourceType": "task_result",
+            "importance": 0.65,
+            "reliability": 0.6,
+            "maxItems": 8,
+        },
+    )
+
     patch(
         "/tasks/status",
         {
             "taskId": task_id,
             "status": "review",
             "actorAgent": "research-agent",
-            "notes": "Moved to review with L3 structured output",
+            "notes": "Moved to review with L3 structured output + memory recall/remember",
             "resultLinks": urls,
         },
     )
 
-    print(json.dumps({"ok": True, "taskId": task_id, "movedTo": "review", "sources": len(urls), "confidence": confidence}))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "taskId": task_id,
+                "movedTo": "review",
+                "sources": len(urls),
+                "confidence": confidence,
+                "memoryConfidenceBand": recall.get("confidenceBand"),
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

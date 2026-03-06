@@ -39,11 +39,22 @@ function optionsHandler() {
   );
 }
 
-http.route({ path: "/mission-control/tasks", method: "OPTIONS", handler: optionsHandler() });
-http.route({ path: "/mission-control/tasks/status", method: "OPTIONS", handler: optionsHandler() });
-http.route({ path: "/mission-control/tasks/claim", method: "OPTIONS", handler: optionsHandler() });
-http.route({ path: "/mission-control/tasks/comment", method: "OPTIONS", handler: optionsHandler() });
-http.route({ path: "/mission-control/tasks/blocked", method: "OPTIONS", handler: optionsHandler() });
+const optionPaths = [
+  "/mission-control/tasks",
+  "/mission-control/tasks/status",
+  "/mission-control/tasks/claim",
+  "/mission-control/tasks/comment",
+  "/mission-control/tasks/blocked",
+  "/mission-control/memory/remember",
+  "/mission-control/memory/extract",
+  "/mission-control/memory/recall",
+  "/mission-control/memory/forget",
+  "/mission-control/memory/tree",
+  "/mission-control/memory/stats",
+  "/mission-control/memory/metrics",
+  "/mission-control/memory/recall/review",
+];
+for (const p of optionPaths) http.route({ path: p, method: "OPTIONS", handler: optionsHandler() });
 
 http.route({
   path: "/mission-control/tasks",
@@ -153,6 +164,98 @@ http.route({
       handoffToAgent: body.handoffToAgent,
       handoffToLane: body.handoffToLane,
     });
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/remember",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.scope || !body?.content) return json({ error: "scope and content are required" }, 400);
+    const result = await ctx.runMutation(api.missionControl.remember, body as any);
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/extract",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.scope || !body?.text) return json({ error: "scope and text are required" }, 400);
+    const result = await ctx.runMutation(api.missionControl.extractAndRemember, body as any);
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/recall",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.scope || !body?.query) return json({ error: "scope and query are required" }, 400);
+    const result = await ctx.runMutation(api.missionControl.recall, body as any);
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/forget",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    const result = await ctx.runMutation(api.missionControl.forget, body as any);
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/tree",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const scope = url.searchParams.get("scope") || "research";
+    const result = await ctx.runQuery(api.missionControl.memoryTree, { scope });
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/stats",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const scope = url.searchParams.get("scope") || undefined;
+    const result = await ctx.runQuery(api.missionControl.memoryStats, { scope });
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/metrics",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const scope = url.searchParams.get("scope") || undefined;
+    const result = await ctx.runQuery(api.missionControl.memoryMetrics, { scope });
+    return json(result);
+  }),
+});
+
+http.route({
+  path: "/mission-control/memory/recall/review",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const body = await req.json();
+    if (!body?.recallLogId || !body?.outcome) return json({ error: "recallLogId and outcome are required" }, 400);
+    const result = await ctx.runMutation(api.missionControl.reviewRecallLog, body as any);
     return json(result);
   }),
 });
