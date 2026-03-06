@@ -22,11 +22,41 @@ function subjectKeyFromText(text: string) {
   return t.split(" ").slice(0, 6).join(" ") || "general";
 }
 
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "that", "this", "what", "when", "where", "which", "who", "why", "how", "are", "was", "were", "will", "have", "has", "had", "into", "over", "under", "about", "after", "before", "every"
+]);
+
+const TOKEN_CANON: Record<string, string> = {
+  moved: "move",
+  moving: "move",
+  change: "update",
+  changed: "update",
+  changes: "update",
+  updated: "update",
+  update: "update",
+  recently: "recent",
+  latest: "recent",
+  new: "recent",
+  review: "review",
+  reviews: "review",
+};
+
+function stemToken(token: string) {
+  if (token.length <= 4) return token;
+  if (token.endsWith("ing") && token.length > 5) return token.slice(0, -3);
+  if (token.endsWith("ed") && token.length > 4) return token.slice(0, -2);
+  if (token.endsWith("es") && token.length > 4) return token.slice(0, -2);
+  if (token.endsWith("s") && token.length > 3) return token.slice(0, -1);
+  return token;
+}
+
 function tokenize(text: string) {
   return normalize(text)
     .replace(/[^a-z0-9\s]/g, " ")
     .split(" ")
-    .filter((x) => x.length > 2);
+    .map((x) => x.trim())
+    .filter((x) => x.length > 2 && !STOPWORDS.has(x))
+    .map((x) => TOKEN_CANON[x] ?? TOKEN_CANON[stemToken(x)] ?? stemToken(x));
 }
 
 function jaccard(a: string[], b: string[]) {
@@ -36,6 +66,15 @@ function jaccard(a: string[], b: string[]) {
   for (const t of sa) if (sb.has(t)) inter += 1;
   const union = new Set([...sa, ...sb]).size || 1;
   return inter / union;
+}
+
+function overlapCoefficient(a: string[], b: string[]) {
+  const sa = new Set(a);
+  const sb = new Set(b);
+  if (!sa.size || !sb.size) return 0;
+  let inter = 0;
+  for (const t of sa) if (sb.has(t)) inter += 1;
+  return inter / Math.min(sa.size, sb.size);
 }
 
 function recencyScore(ts: number) {
@@ -484,12 +523,19 @@ export const recall = mutation({
       .collect();
 
     const scored = candidates.map((m: any) => {
-      const sim = jaccard(queryTokens, tokenize(m.content));
+      const contentTokens = tokenize(m.content);
+      const simJ = jaccard(queryTokens, contentTokens);
+      const simOverlap = overlapCoefficient(queryTokens, contentTokens);
+      const sim = Math.max(simJ, 0.85 * simOverlap);
       const rec = recencyScore(m.updatedAt || m.createdAt);
       const imp = Math.max(0, Math.min(1, m.importance ?? 0.5));
       const rel = Math.max(0, Math.min(1, m.reliability ?? 0.6));
-      const score = 0.45 * sim + 0.2 * rec + 0.2 * imp + 0.15 * rel;
-      return { ...m, score, scoreParts: { similarity: sim, recency: rec, importance: imp, reliability: rel } };
+      const score = 0.5 * sim + 0.2 * rec + 0.18 * imp + 0.12 * rel;
+      return {
+        ...m,
+        score,
+        scoreParts: { similarity: sim, jaccard: simJ, overlap: simOverlap, recency: rec, importance: imp, reliability: rel },
+      };
     });
 
     scored.sort((a: any, b: any) => b.score - a.score);

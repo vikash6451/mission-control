@@ -74,7 +74,8 @@ def main():
     })
 
     recall_log_id = recall.get("recallLog", {}).get("_id") or recall.get("recallLogId")
-    review_outcome = "accepted" if recall.get("confidence") in ("high", "medium") else "rejected"
+    confidence = recall.get("confidenceBand") or recall.get("confidence")
+    review_outcome = "accepted" if confidence in ("high", "medium") else "rejected"
 
     review = None
     if recall_log_id:
@@ -90,10 +91,10 @@ def main():
         "scope": SCOPE,
         "seededOps": len(seeded),
         "recall": {
-            "confidence": recall.get("confidence"),
+            "confidence": confidence,
             "requiresReview": recall.get("requiresReview"),
-            "evidenceGaps": recall.get("evidenceGaps", []),
-            "results": len(recall.get("results", [])),
+            "evidenceGaps": recall.get("evidenceGaps", recall.get("evidence_gaps", [])),
+            "results": len(recall.get("results", recall.get("memories", []))),
             "recallLogId": recall_log_id,
         },
         "review": review,
