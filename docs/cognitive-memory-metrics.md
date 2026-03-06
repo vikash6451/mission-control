@@ -29,3 +29,4 @@
 - Contradiction events: `remember`/`extractAndRemember` via consolidation logic.
 - Reporting endpoint: `GET /mission-control/memory/metrics`.
 - Scripted report: `scripts/memory_metrics_report.py`.
+- Seeded end-to-end validation: `scripts/memory_seeded_e2e.py` (remember -> recall -> review -> metrics).
