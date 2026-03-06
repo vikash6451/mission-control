@@ -50,6 +50,32 @@ CLIENT_KEYWORDS = {
     "bukuwarung": ["bukuwarung", "indonesia", "warung", "msme indonesia"],
 }
 
+# Domain routing is agent-facing knowledge segmentation, independent of specific clients.
+DOMAIN_KEYWORDS = {
+    "finance": [
+        "credit card", "reward", "miles", "forex", "lounge", "fintech", "payment", "upi", "lending", "interest", "apr",
+    ],
+    "growth": [
+        "cac", "ltv", "retention", "activation", "uac", "attribution", "creative", "funnel", "conversion", "seo", "ads",
+    ],
+    "research": [
+        "study", "paper", "benchmark", "analysis", "experiment", "methodology", "evidence", "insight",
+    ],
+    "sports": [
+        "fpl", "fantasy", "premier league", "ipl", "cricket", "football", "gw", "captain",
+    ],
+    "ops": [
+        "automation", "workflow", "cron", "playbook", "infra", "incident", "monitoring", "deployment",
+    ],
+}
+
+SOURCE_DEFAULT_DOMAINS = {
+    "newsletter": ["research"],
+    "twitter": ["research", "growth"],
+    "reddit": ["research"],
+    "hn": ["research", "ops"],
+}
+
 URL_RE = re.compile(r"https?://\S+")
 
 if not ADMIN_KEY:
@@ -100,26 +126,84 @@ def parse_ts(s: str | None) -> str | None:
 
 def extract_tags(text: str) -> List[str]:
     t = text.lower()
+    token_set = set(re.findall(r"[a-z0-9]+", t))
+
+    # exact token matches + explicit multi-word phrases only (no loose substring matching)
     tag_map = {
-        "ai": ["llm", "gpt", "claude", "ai agent", "inference", "rag", "model"],
-        "fintech": ["fintech", "payment", "upi", "credit", "lending", "card"],
-        "growth": ["cac", "ltv", "uac", "retention", "activation", "attribution"],
-        "product": ["onboarding", "feature", "funnel", "experimentation", "a/b"],
-        "india": ["india", "rbi", "upi", "gst", "inr"],
+        "ai": {
+            "tokens": {"llm", "gpt", "claude", "inference", "rag", "model"},
+            "phrases": {"ai agent", "ai agents", "artificial intelligence"},
+        },
+        "fintech": {
+            "tokens": {"fintech", "payment", "payments", "upi", "credit", "lending", "card", "cards", "forex", "miles", "rewards"},
+            "phrases": {"credit card", "travel rewards", "reward points"},
+        },
+        "growth": {
+            "tokens": {"cac", "ltv", "uac", "retention", "activation", "attribution", "conversion", "funnel"},
+            "phrases": {"creative testing", "performance marketing"},
+        },
+        "product": {
+            "tokens": {"onboarding", "feature", "funnel", "experimentation", "ab", "a", "b"},
+            "phrases": {"a/b", "a b", "product led"},
+        },
+        "india": {
+            "tokens": {"india", "rbi", "upi", "gst", "inr", "rupee", "rupees"},
+            "phrases": {"reserve bank"},
+        },
     }
+
     out = []
-    for tag, kws in tag_map.items():
-        if any(k in t for k in kws):
+    for tag, matcher in tag_map.items():
+        tokens = matcher.get("tokens", set())
+        phrases = matcher.get("phrases", set())
+        if (tokens and token_set.intersection(tokens)) or any(p in t for p in phrases):
             out.append(tag)
     return out[:5]
 
 
-def route_scopes(text: str) -> List[str]:
+def _keyword_hit(text: str, keywords: List[str]) -> bool:
     t = text.lower()
+    tokens = set(re.findall(r"[a-z0-9]+", t))
+    for kw in keywords:
+        k = kw.strip().lower()
+        if not k:
+            continue
+        if " " in k:
+            if k in t:
+                return True
+        else:
+            if k in tokens:
+                return True
+    return False
+
+
+def route_scopes(text: str, source: str, tags: List[str] | None = None) -> List[str]:
+    t = text.lower()
+    tags = tags or []
     scopes = [DEFAULT_SCOPE_GLOBAL, DEFAULT_SCOPE_SIGNALS]
+
+    # Client scopes
     for client, kws in CLIENT_KEYWORDS.items():
-        if any(k in t for k in kws):
+        if _keyword_hit(t, kws):
             scopes.append(f"research/client/{client}")
+
+    # Domain scopes from source defaults + keyword matches + tags.
+    domains = set(SOURCE_DEFAULT_DOMAINS.get(source, []))
+    for domain, kws in DOMAIN_KEYWORDS.items():
+        if _keyword_hit(t, kws):
+            domains.add(domain)
+
+    # Tag-to-domain boosts
+    if "fintech" in tags:
+        domains.add("finance")
+    if "growth" in tags:
+        domains.add("growth")
+    if "ai" in tags:
+        domains.add("research")
+
+    for d in sorted(domains):
+        scopes.append(f"research/domain/{d}")
+
     return list(dict.fromkeys(scopes))
 
 
@@ -278,7 +362,11 @@ def main():
     writes = []
     errors = []
     for q, fp, item in scored:
-        scopes = route_scopes(f"{item['claim']} {item.get('evidence','')} {item.get('author','')}")
+        scopes = route_scopes(
+            f"{item['claim']} {item.get('evidence','')} {item.get('author','')}",
+            source=item.get("source", "newsletter"),
+            tags=item.get("tags", []),
+        )
         reliability = round(q, 3)
         importance = round(min(0.9, max(0.45, 0.55 + (q - 0.5) * 0.5)), 3)
         content = memory_content(item, fp)
