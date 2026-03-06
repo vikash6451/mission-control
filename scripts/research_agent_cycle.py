@@ -8,6 +8,8 @@ import sys
 import textwrap
 import requests
 
+from exa_deep_search import exa_search
+
 BASE = os.getenv("MISSION_CONTROL_BASE", "https://dutiful-goshawk-499.convex.site/mission-control")
 ADMIN_KEY = os.getenv("MISSION_CONTROL_ADMIN_KEY", "")
 MEMORY_SCOPE = os.getenv("MISSION_CONTROL_MEMORY_SCOPE", "research")
@@ -83,6 +85,17 @@ def recall_multi_scope(query_text: str, top_k_per_scope: int = 4):
     }
 
 
+def exa_url_fallback(query_text: str, need: int):
+    need = max(0, min(6, need))
+    if need == 0:
+        return []
+    try:
+        deep = exa_search(query_text, num_results=need, deep=True)
+        return [r.get("url") for r in deep.get("results", []) if r.get("url")]
+    except Exception:
+        return []
+
+
 def run():
     claimed = post("/tasks/claim", {"lane": "research", "agent": "research-agent"})
     task = claimed.get("task")
@@ -118,30 +131,40 @@ def run():
     recall = recall_multi_scope(f"{title}\n{desc}\n{ac}", top_k_per_scope=4)
 
     if recall.get("allRequireReview") and not recall.get("anyMediumPlus"):
-        post(
-            "/tasks/blocked",
-            {
-                "taskId": task_id,
-                "actorAgent": "research-agent",
-                "blockerReason": "Low-confidence memory recall across all scopes; manual review required before execution. Gaps: "
-                + "; ".join(recall.get("evidence_gaps", [])[:3]),
-                "handoffToAgent": "main-orchestrator",
-                "handoffToLane": "ops",
-            },
-        )
-        print(
-            json.dumps(
+        # Exa Deep fallback before blocking the task.
+        exa_urls = exa_url_fallback(f"{title}\n{desc}\n{ac}", need=max(2, min_sources))
+        urls = list(dict.fromkeys(urls + exa_urls))
+        if not exa_urls:
+            post(
+                "/tasks/blocked",
                 {
-                    "ok": False,
                     "taskId": task_id,
-                    "blocked": "low_confidence_memory_recall",
-                    "confidenceBand": recall.get("topConfidence"),
-                    "evidence_gaps": recall.get("evidence_gaps", []),
-                    "scopes": MEMORY_SCOPES,
-                }
+                    "actorAgent": "research-agent",
+                    "blockerReason": "Low-confidence memory recall across all scopes and Exa fallback returned no evidence. Gaps: "
+                    + "; ".join(recall.get("evidence_gaps", [])[:3]),
+                    "handoffToAgent": "main-orchestrator",
+                    "handoffToLane": "ops",
+                },
             )
-        )
-        return
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "taskId": task_id,
+                        "blocked": "low_confidence_memory_recall",
+                        "confidenceBand": recall.get("topConfidence"),
+                        "evidence_gaps": recall.get("evidence_gaps", []),
+                        "scopes": MEMORY_SCOPES,
+                    }
+                )
+            )
+            return
+
+    if len(urls) < min_sources:
+        # Exa Deep fallback for missing evidence links.
+        need = min_sources - len(urls)
+        exa_urls = exa_url_fallback(f"{title}\n{desc}\n{ac}", need=need)
+        urls = list(dict.fromkeys(urls + exa_urls))
 
     if len(urls) < min_sources:
         post(
@@ -149,7 +172,7 @@ def run():
             {
                 "taskId": task_id,
                 "actorAgent": "research-agent",
-                "blockerReason": f"Insufficient evidence inputs: found {len(urls)} source links, need >= {min_sources}",
+                "blockerReason": f"Insufficient evidence inputs even after Exa fallback: found {len(urls)} source links, need >= {min_sources}",
                 "handoffToAgent": "main-orchestrator",
                 "handoffToLane": "ops",
             },
