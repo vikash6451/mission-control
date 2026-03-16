@@ -48,13 +48,25 @@ Current backend target:
 - `scripts/memory_metrics_report.py` reports KPI JSON from `/memory/metrics`
 
 ## Deployment
-Use SSM deploy key and deploy from repo root:
+Use deterministic SSM -> Convex env hydration + deploy:
 
 ```bash
-python3 - <<'PY'
-import boto3, os, subprocess
-v=boto3.client('ssm',region_name='eu-north-1').get_parameter(Name='/clawd/CONVEX_DEPLOY_KEY',WithDecryption=True)['Parameter']['Value']
-env=os.environ.copy(); env['CONVEX_DEPLOY_KEY']=v
-subprocess.run(['npx','convex','deploy','--yes','--preview-create','mission-control-lite'],env=env,check=True)
-PY
+python3 /home/ubuntu/clawd/scripts/deploy_mission_control.py
 ```
+
+This ensures both:
+- `CONVEX_DEPLOY_KEY` (for deploy auth)
+- `MISSION_CONTROL_ADMIN_KEY` (for runtime admin auth)
+
+are loaded from SSM before deploy.
+
+## Runtime health check
+Verify runtime key configuration after deploy:
+
+```bash
+curl -sS https://<your-convex-site>/mission-control/health/auth-config
+```
+
+Expected:
+- `200` with `{ "ok": true, "configured": true, ... }` when runtime key is set.
+- `503` when runtime key is missing/placeholder.

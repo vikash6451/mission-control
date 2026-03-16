@@ -15,11 +15,14 @@ Lightweight taskboard with lane isolation + cognitive memory:
 - `scripts/memory_metrics_report.py` memory KPI report
 
 ## Deploy backend (Convex)
-Set `CONVEX_DEPLOY_KEY` in env (from secure store), then:
+Use deterministic SSM -> Convex env hydration, then deploy:
 
 ```bash
-npx convex deploy --yes --preview-create mission-control-lite
+python3 /home/ubuntu/clawd/scripts/deploy_mission_control.py
 ```
+
+This script pulls both `/clawd/CONVEX_DEPLOY_KEY` and `/clawd/MISSION_CONTROL_ADMIN_KEY` from SSM,
+sets `MISSION_CONTROL_ADMIN_KEY` in Convex env, then deploys.
 
 ## Deploy frontend (Cloudflare Pages)
 Deploy only `apps/mission-control-lite` folder.
@@ -45,4 +48,8 @@ python3 scripts/memory_metrics_report.py
 
 ## Security note
 Current admin gating uses `x-admin-key` in HTTP routes.
-Set `MISSION_CONTROL_ADMIN_KEY` in Convex env for production.
+
+Important hardening:
+- Placeholder admin keys are rejected.
+- If runtime key is missing, protected routes return `503 admin key not configured in runtime`.
+- Health endpoint: `GET /mission-control/health/auth-config` (200 when configured, 503 otherwise).

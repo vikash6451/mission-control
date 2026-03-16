@@ -4,14 +4,28 @@ import { api } from "./_generated/api";
 
 const http = httpRouter();
 
+const ADMIN_KEY_PLACEHOLDER = "CHANGE_ME_LOCAL_ADMIN_KEY";
+
 function getAdminKey() {
-  return process.env.MISSION_CONTROL_ADMIN_KEY ?? "CHANGE_ME_LOCAL_ADMIN_KEY";
+  const key = (process.env.MISSION_CONTROL_ADMIN_KEY ?? "").trim();
+  if (!key) return null;
+  if (key === ADMIN_KEY_PLACEHOLDER) return null;
+  if (/^CHANGE_ME/i.test(key)) return null;
+  return key;
 }
 
-function isAdmin(req: Request) {
+function requireAdmin(req: Request) {
   const key = getAdminKey();
-  const provided = req.headers.get("x-admin-key");
-  return !!key && !!provided && key === provided;
+  if (!key) {
+    return json({ error: "admin key not configured in runtime" }, 503);
+  }
+
+  const provided = req.headers.get("x-admin-key")?.trim();
+  if (!provided || provided !== key) {
+    return json({ error: "admin key required" }, 401);
+  }
+
+  return null;
 }
 
 function json(data: unknown, status = 200) {
@@ -57,6 +71,19 @@ const optionPaths = [
 for (const p of optionPaths) http.route({ path: p, method: "OPTIONS", handler: optionsHandler() });
 
 http.route({
+  path: "/mission-control/health/auth-config",
+  method: "GET",
+  handler: httpAction(async () => {
+    const configured = !!getAdminKey();
+    return json({
+      ok: configured,
+      configured,
+      envVar: "MISSION_CONTROL_ADMIN_KEY",
+    }, configured ? 200 : 503);
+  }),
+});
+
+http.route({
   path: "/mission-control/tasks",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
@@ -72,7 +99,8 @@ http.route({
   path: "/mission-control/tasks",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.title || !body?.lane || !body?.description || !body?.acceptanceCriteria || !body?.outputFormat) {
       return json({ error: "title, lane, description, acceptanceCriteria, outputFormat are required" }, 400);
@@ -98,7 +126,8 @@ http.route({
   path: "/mission-control/tasks/status",
   method: "PATCH",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.taskId || !body?.status) return json({ error: "taskId and status are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.updateTaskStatus, {
@@ -117,7 +146,8 @@ http.route({
   path: "/mission-control/tasks/claim",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.lane || !body?.agent) return json({ error: "lane and agent are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.claimNextTask, {
@@ -132,7 +162,8 @@ http.route({
   path: "/mission-control/tasks/comment",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.taskId || !body?.authorAgent || !body?.body) {
       return json({ error: "taskId, authorAgent, body are required" }, 400);
@@ -152,7 +183,8 @@ http.route({
   path: "/mission-control/tasks/blocked",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.taskId || !body?.actorAgent || !body?.blockerReason) {
       return json({ error: "taskId, actorAgent, blockerReason are required" }, 400);
@@ -172,7 +204,8 @@ http.route({
   path: "/mission-control/memory/remember",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.scope || !body?.content) return json({ error: "scope and content are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.remember, body as any);
@@ -184,7 +217,8 @@ http.route({
   path: "/mission-control/memory/extract",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.scope || !body?.text) return json({ error: "scope and text are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.extractAndRemember, body as any);
@@ -196,7 +230,8 @@ http.route({
   path: "/mission-control/memory/recall",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.scope || !body?.query) return json({ error: "scope and query are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.recall, body as any);
@@ -208,7 +243,8 @@ http.route({
   path: "/mission-control/memory/forget",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     const result = await ctx.runMutation(api.missionControl.forget, body as any);
     return json(result);
@@ -252,7 +288,8 @@ http.route({
   path: "/mission-control/memory/recall/review",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    if (!isAdmin(req)) return json({ error: "admin key required" }, 401);
+    const adminErr = requireAdmin(req);
+    if (adminErr) return adminErr;
     const body = await req.json();
     if (!body?.recallLogId || !body?.outcome) return json({ error: "recallLogId and outcome are required" }, 400);
     const result = await ctx.runMutation(api.missionControl.reviewRecallLog, body as any);
