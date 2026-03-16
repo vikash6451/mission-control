@@ -10,8 +10,13 @@ import requests
 
 from exa_deep_search import exa_search
 
+try:
+    from integrations.secrets import get_secret
+except Exception:
+    get_secret = None
+
 BASE = os.getenv("MISSION_CONTROL_BASE", "https://dutiful-goshawk-499.convex.site/mission-control")
-ADMIN_KEY = os.getenv("MISSION_CONTROL_ADMIN_KEY", "")
+ADMIN_KEY = os.getenv("MISSION_CONTROL_ADMIN_KEY", "") or ((get_secret("MISSION_CONTROL_ADMIN_KEY") if get_secret else "") or "")
 MEMORY_SCOPE = os.getenv("MISSION_CONTROL_MEMORY_SCOPE", "research")
 MEMORY_SCOPES = [s.strip() for s in os.getenv("MISSION_CONTROL_MEMORY_SCOPES", f"{MEMORY_SCOPE},research/global,research/signals/market").split(",") if s.strip()]
 
